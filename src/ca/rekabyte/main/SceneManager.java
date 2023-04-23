@@ -1,35 +1,61 @@
 package ca.rekabyte.main;
 
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Statement;
 
-import javax.swing.*;
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JMenu;
+import javax.swing.JMenuBar;
+import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
+import javax.swing.ToolTipManager;
 
 @SuppressWarnings("serial")
 public class SceneManager extends JFrame{
+	private String url = "jdbc:postgresql://localhost/projet2";
+	private String user = "postgres";
+	private String password = "admin";
 
-	private final String url = "jdbc:postgresql://localhost/projet";
-	private final String user = "postgres";
-	private final String password = "admin";
+	private final String query1 = 	"SELECT "
+									+ "	CONCAT (aa.Prenom, ' ', aa.Nom) Adherent,"
+									+ "	ee.Date_emprunt,"
+									+ "	ll.Titre,"
+									+ "	NOW(),"
+									+ "	EXTRACT(DAY FROM COALESCE(ee.Date_retour,NOW())-ee.Date_emprunt) AS DateDifference "
+									+ "FROM Emprunte ee, Livre ll, Adherent aa WHERE ee.Livre_id = ll.Livre_id AND aa.No_adherent = ee.No_adherent "
+									+ "AND EXTRACT(DAY FROM COALESCE(ee.Date_retour,NOW())-ee.Date_emprunt) >14";
 
-	private final String query1 = 	"SELECT adherent.no_adherent, adherent.nom, adherent.prenom, emprunte.date_retour, COUNT(*) " +
-									"FROM adherent JOIN emprunte ON emprunte.no_adherent = adherent.no_adherent " +
-									"WHERE emprunte.date_retour < CURRENT_DATE " +
-									"GROUP BY adherent.no_adherent, adherent.nom, adherent.prenom, emprunte.date_retour;";
-	private final String query2 = 	"SELECT livre.livre_id, livre.titre, COUNT(*) " +
-									"FROM livre " +
-									"JOIN emprunte ON emprunte.livre_id = livre.livre_id " +
-									"GROUP BY livre.livre_id, livre.titre;";
-	private final String query3 = 	"SELECT EXTRACT(YEAR FROM date_emprunt), COUNT(*) " +
-									"FROM emprunte " +
-									"GROUP BY EXTRACT(YEAR FROM date_emprunt);";
-	private final String query4 = 	"SELECT adherent.no_adherent, adherent.nom, adherent.prenom, livre.livre_id, livre.titre, commande.date_commande, commande.quantite " +
-									"FROM adherent " +
-									"JOIN commande ON commande.no_adherent = adherent.no_adherent " +
-									"JOIN livre ON commande.livre_id = livre.livre_id " +
-									"ORDER BY commande.date_commande;";
+	private final String query2 = 	"SELECT ee.No_adherent, COUNT(ee.No_adherent) Books_borrowed, MAX(aa.Nom), MAX(aa.Prenom) FROM Emprunte ee, Adherent aa "
+									+ "WHERE ee.No_adherent = aa.No_adherent "
+									+ "GROUP BY ee.No_adherent ";
+
+	private final String query3 = 	"SELECT aa.Nom, aa.Prenom, "
+									+ "EXTRACT(YEAR FROM ee.Date_emprunt) yyyy, COUNT(*) Number_of_books "
+									+ "FROM Adherent aa LEFT JOIN Emprunte ee ON aa.No_adherent = ee.No_adherent "
+									+ "GROUP BY  aa.No_adherent, EXTRACT(YEAR FROM ee.Date_emprunt) "
+									+ "ORDER BY EXTRACT(YEAR FROM ee.Date_emprunt)";
+
+	private final String query4 = 	"SELECT aa.Nom, aa.Prenom, ll.Titre, COUNT(*) Borrowings_per_book FROM Emprunte ee, Livre ll, Adherent aa  " +
+									"WHERE ee.Livre_id = ll.Livre_id AND aa.No_adherent = ee.No_adherent " +
+									"GROUP BY aa.No_adherent, ll.Livre_id " +
+									"ORDER BY COUNT(*) DESC ";
 
 	private final String popup_msg = 	"Ce logiciel a été développé afin d'aider les bibliothèques a gérer leurs bases de données" +
 										" et leur permettre d'accèder 4 requetes utiles et essentiels en un seul clic.";
@@ -42,7 +68,9 @@ public class SceneManager extends JFrame{
 	private JMenuItem item_exit, item_effacer, item_infos;
 	private JScrollPane scrollPane;
 	private JLabel titre;
-	
+
+
+
 	public SceneManager() {
 
 		//Initialisation des components:
@@ -62,7 +90,7 @@ public class SceneManager extends JFrame{
 		panel_centre = new JPanel();
 		panel_gauche = new JPanel();
 		panel_haut = new JPanel();
-		
+
 		textArea = new JTextArea();
 		menuBar = new JMenuBar();
 		scrollPane = new JScrollPane(textArea);
@@ -93,7 +121,7 @@ public class SceneManager extends JFrame{
 		question1.setToolTipText("Quel est le nombre de livres empruntés qui ont des retards éventuels?");
 		question2.setToolTipText("Combien de fois chaque livre a-t-il été emprunté ?\n");
 		question3.setToolTipText("Nombre de livres empruntés chaque année.");
-		question4.setToolTipText("L'auteur plus populaire compte tenu du nombre total de livres empruntés à la bibliothèque?");
+		question4.setToolTipText("Nombre d’emprunts par livre");
 
 
 		//Parametres du jframe:
@@ -117,7 +145,7 @@ public class SceneManager extends JFrame{
 		panel_gauche.setBorder(BorderFactory.createRaisedBevelBorder());
 		panel_gauche.setPreferredSize(new Dimension(150,0));
 		panel_centre.setBorder(BorderFactory.createRaisedBevelBorder());
-		
+
 		//Ajout des components dans les layouts:
 		panel_haut.add(Box.createRigidArea(new Dimension(0, 30)));
 		panel_haut.add(titre);
@@ -198,6 +226,19 @@ public class SceneManager extends JFrame{
 			}
 		});
 
+		//Pour se connecter a la base de donnees:
+		Connection connTest = null;
+		String err_msg = "Impossible de se connecter a la DB, les infos saisies sont erronn�es, reessayer.";
+		while(connTest == null) {
+			url = JOptionPane.showInputDialog("Adresse de la BD: (Generalement de la forme: \"jdbc:postgresql://localhost/[inserer_nom_db_ici]\")");
+			user = JOptionPane.showInputDialog("Nom de l'user: (Generalement \"postgres\")");
+			password = JOptionPane.showInputDialog("Password de l'user:  ");
+			connTest = connect();
+			if(connTest == null) {
+				JOptionPane.showMessageDialog(null, err_msg, "Informations", JOptionPane.ERROR_MESSAGE);
+			}
+		}
+
 
 		//Finition
 		ToolTipManager.sharedInstance().setEnabled(true);
@@ -240,5 +281,7 @@ public class SceneManager extends JFrame{
 
 		return new String("Aucun resultat");
 	}
+
+
 
 }
